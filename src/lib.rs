@@ -13,12 +13,14 @@ pub use crate::pb::{
     ResourceIdentifier, StatFsResult, SupportedCapabilities, TaskOptions, VolumeBehavior,
     VolumeIdentifier, Xattrs, directory_entries,
 };
+pub use crate::registration::Status;
 use crate::session::Session;
 
 mod handler;
 mod info;
 pub mod installer;
 pub mod mounter;
+mod registration;
 pub mod session;
 pub mod socket;
 
@@ -285,6 +287,13 @@ pub fn install<P: AsRef<Path>, Q: AsRef<Path>>(
 /// ```
 pub fn uninstall<P: AsRef<Path>>(destination: P) -> installer::Result<()> {
     installer::uninstall(destination.as_ref())
+}
+
+/// Returns all FSKit extension registrations matching `fskit_id`.
+///
+/// Each status item reports the extension path and whether PlugInKit marks it as elected.
+pub fn registrations(fskit_id: &str) -> installer::Result<Vec<Status>> {
+    registration::registrations(fskit_id)
 }
 
 #[macro_export]

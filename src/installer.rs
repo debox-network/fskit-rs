@@ -2,12 +2,12 @@ use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
 
-use crate::info::Info;
+use super::info::Info;
 
 pub(super) type Result<T> = std::result::Result<T, Error>;
 
 const LSREGISTER: &str = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
-const PLUGINKIT: &str = "/usr/bin/pluginkit";
+pub(super) const PLUGINKIT: &str = "/usr/bin/pluginkit";
 const XATTR: &str = "/usr/bin/xattr";
 const OPEN: &str = "/usr/bin/open";
 const FSKIT_EXTENSION_POINT: &str = "com.apple.fskit.fsmodule";
@@ -116,21 +116,21 @@ fn clear_quarantine(app: &Path) -> Result<()> {
 }
 
 fn is_registered(bundle_id: &str) -> Result<bool> {
-    let output = Command::new(PLUGINKIT)
-        .args(["-m", "-i", bundle_id])
-        .output()?;
-    if !output.status.success() {
+    let Ok(output) = run_cmd_out(PLUGINKIT, &["-m", "-i", bundle_id]) else {
         return Ok(false);
-    }
-
+    };
     let stdout = String::from_utf8_lossy(&output.stdout);
     Ok(stdout.contains(bundle_id))
 }
 
 fn run_cmd(cmd: &'static str, args: &[&str]) -> Result<()> {
+    run_cmd_out(cmd, args).map(|_| ())
+}
+
+pub(super) fn run_cmd_out(cmd: &'static str, args: &[&str]) -> Result<Output> {
     let output = Command::new(cmd).args(args).output()?;
     if output.status.success() {
-        Ok(())
+        Ok(output)
     } else {
         Err(Error::CommandFailed {
             command: format!("{cmd} {}", args.join(" ")),
@@ -154,7 +154,7 @@ pub enum Error {
     Io(#[from] std::io::Error),
 
     #[error(transparent)]
-    Info(#[from] crate::info::Error),
+    Info(#[from] super::info::Error),
 
     #[error("host application not found")]
     AppNotFound,

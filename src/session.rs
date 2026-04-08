@@ -1,14 +1,13 @@
-use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
 use log::error;
-use regex::Regex;
 
-use crate::handler::Handler;
-use crate::info::Info;
-use crate::mounter::Mounter;
-use crate::socket::Socket;
-use crate::{Filesystem, MountOptions, info, mounter, socket};
+use super::handler::Handler;
+use super::installer;
+use super::mounter::Mounter;
+use super::registration::read_config;
+use super::socket::Socket;
+use super::{Filesystem, MountOptions, mounter, socket};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -51,34 +50,6 @@ impl Drop for Session {
     }
 }
 
-fn read_config(fskit_id: &str) -> Result<(u16, String)> {
-    // Get the output of the 'pluginkit' command
-    // pluginkit -m -i <fskit_id> --raw
-    let output = Command::new("pluginkit")
-        .args(["-m", "-i", fskit_id, "--raw"])
-        .output()?;
-    if !output.status.success() {
-        error!(
-            "failed to query pluginkit for {fskit_id}: {}",
-            describe_failure(&output)
-        );
-        return Err(Error::ExtensionNotRegistered);
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-
-    // Find the full path to appex
-    let reg = Regex::new(r#"(?m)^\s*path = "([^"]+)";"#).unwrap();
-    let Some(line) = reg.captures_iter(&stdout).last() else {
-        error!("pluginkit did not return a registered path for {fskit_id}");
-        return Err(Error::ExtensionNotRegistered);
-    };
-
-    // Get configuration
-    let info = Info::new(Path::new(&line[1]))?;
-    Ok((info.server_port()?, info.fs_type()?))
-}
-
 pub(super) fn describe_failure(output: &Output) -> String {
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     if stderr.is_empty() {
@@ -93,11 +64,8 @@ pub enum Error {
     #[error(transparent)]
     Io(#[from] std::io::Error),
 
-    #[error("file system extension not registered")]
-    ExtensionNotRegistered,
-
     #[error(transparent)]
-    Info(#[from] info::Error),
+    Installer(#[from] installer::Error),
 
     #[error(transparent)]
     Socket(#[from] socket::Error),
