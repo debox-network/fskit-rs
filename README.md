@@ -29,7 +29,7 @@ FSKitExt appex). For the Swift/FSKit integration details, see:
   schema is the wire contract between the Swift appex and this Rust backend — defining all RPC messages/enums.
 - **Handle errors:** Unified `Error` (includes POSIX via `libc::*`) and `Result<T>`.
 - **Session runner:** `session::mount(fs, opts)` mounts and serves requests until dropped.
-- **Installer helper:** `install(path, force)` utility for host app installation (optional).
+- **Installer helper:** `install(source, destination, force)` and `uninstall(destination)` utilities for host app lifecycle (optional).
 
 > This crate is the transport + protocol + trait layer. You bring the actual file system logic.
 

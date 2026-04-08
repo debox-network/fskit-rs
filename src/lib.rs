@@ -211,7 +211,7 @@ pub struct MountOptions {
 impl Default for MountOptions {
     fn default() -> Self {
         Self {
-            fskit_id: FSKIT_ID.to_string(),
+            fskit_id: FSKIT_ID.into(),
             mount_point: PathBuf::from(DEFAULT_MOUNT_POINT),
             force: true,
         }
@@ -241,23 +241,50 @@ where
     Session::new(fs, opts).await
 }
 
-/// Installs the FSKit host application into `/Applications` and registers its extension.
+/// Installs the FSKit host application into `destination` and registers its extension.
 ///
 /// # Behavior
-/// - If `force` is `true`, removes any existing app from `/Applications`.
-/// - Copies the app bundle from `path` to `/Applications`.
-/// - Removes the quarantine attribute from the installed app.
-/// - Launches the installed host app once to trigger extension discovery and registration.
+/// - If `force` is `true`, removes any existing app at `destination`.
+/// - Copies the app bundle from `source` to `destination`.
+/// - Registers the host app with LaunchServices.
+/// - Registers the embedded `FSKitExt.appex` with PlugInKit.
+/// - Clears `com.apple.quarantine` only when it is present on the installed app.
+/// - Falls back to launching the installed host app only if command-line registration
+///   was not enough.
 ///
 /// # Commands
 /// ```text
-/// rm -rf /Applications/<app>
-/// cp -r <path_to_app> /Applications
-/// xattr -dr com.apple.quarantine /Applications/<app>
-/// open -a /Applications/<app> --args -s
+/// rm -rf <destination>
+/// ditto <source> <destination>
+/// xattr -dr com.apple.quarantine <destination>          # only if quarantine is present
+/// lsregister -f -R <destination>
+/// pluginkit -a <destination>/Contents/Extensions/FSKitExt.appex
+/// pluginkit -e use -p com.apple.fskit.fsmodule -i <appex bundle id>
+/// open <destination>                                    # fallback only
 /// ```
-pub fn install<P: AsRef<Path>>(path: P, force: bool) -> installer::Result<()> {
-    installer::run(path.as_ref(), force)
+pub fn install<P: AsRef<Path>, Q: AsRef<Path>>(
+    source: P,
+    destination: Q,
+    force: bool,
+) -> installer::Result<()> {
+    installer::run(source.as_ref(), destination.as_ref(), force)
+}
+
+/// Uninstalls the FSKit host application from `destination`.
+///
+/// # Behavior
+/// - Best-effort unregisters the embedded `FSKitExt.appex` from PlugInKit.
+/// - Best-effort unregisters the host app from LaunchServices.
+/// - Removes the app bundle from `destination`.
+///
+/// # Commands
+/// ```text
+/// pluginkit -r <destination>/Contents/Extensions/FSKitExt.appex   # best effort
+/// lsregister -u <destination>                                     # best effort
+/// rm -rf <destination>
+/// ```
+pub fn uninstall<P: AsRef<Path>>(destination: P) -> installer::Result<()> {
+    installer::uninstall(destination.as_ref())
 }
 
 #[macro_export]
