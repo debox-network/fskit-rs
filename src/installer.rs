@@ -1,8 +1,9 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use super::info::Info;
+use super::registration;
 
 pub(super) type Result<T> = std::result::Result<T, Error>;
 
@@ -22,8 +23,6 @@ pub(super) fn run(source: &Path, destination: &Path, force: bool) -> Result<()> 
         return Err(Error::InvalidDestination);
     };
 
-    let appex = destination.join(FSKIT_APPEX_RELATIVE_PATH);
-
     if destination.exists() {
         if !force {
             return Err(Error::AppInstalled);
@@ -39,52 +38,15 @@ pub(super) fn run(source: &Path, destination: &Path, force: bool) -> Result<()> 
         &[source.to_str().unwrap(), destination.to_str().unwrap()],
     )?;
 
-    if !appex.exists() {
-        return Err(Error::ExtensionNotFound);
-    }
-
-    let bundle_id = Info::new(&appex)?.bundle_id()?;
-
-    clear_quarantine(destination)?;
-
-    // Register the host app with LaunchServices.
-    run_cmd(LSREGISTER, &["-f", "-R", destination.to_str().unwrap()])?;
-    // Register the embedded FSKit extension with PlugInKit.
-    run_cmd(PLUGINKIT, &["-a", appex.to_str().unwrap()])?;
-
-    // Prefer this FSKit module when the system supports extension election.
-    let _ = run_cmd(
-        PLUGINKIT,
-        &[
-            "-e",
-            "use",
-            "-p",
-            FSKIT_EXTENSION_POINT,
-            "-i",
-            bundle_id.as_str(),
-        ],
-    );
-
-    if is_registered(&bundle_id)? {
-        return Ok(());
-    }
-
-    // Fall back to opening the host app once when CLI registration is not enough.
-    run_cmd(OPEN, &[destination.to_str().unwrap()])?;
-
-    if is_registered(&bundle_id)? {
-        Ok(())
-    } else {
-        Err(Error::ExtensionNotRegistered { bundle_id })
-    }
+    activate(destination)
 }
 
-pub(super) fn uninstall(destination: &Path) -> Result<()> {
-    if !destination.exists() {
-        return Err(Error::AppNotInstalled);
+pub(super) fn uninstall(app_path: &Path) -> Result<()> {
+    if !app_path.exists() {
+        return Err(Error::AppNotFound);
     }
 
-    let appex = destination.join(FSKIT_APPEX_RELATIVE_PATH);
+    let appex = appex_path(app_path)?;
 
     if appex.exists() {
         // Best-effort unregister the embedded FSKit extension first.
@@ -92,11 +54,85 @@ pub(super) fn uninstall(destination: &Path) -> Result<()> {
     }
 
     // Best-effort unregister the host app from LaunchServices.
-    let _ = run_cmd(LSREGISTER, &["-u", destination.to_str().unwrap()]);
+    let _ = run_cmd(LSREGISTER, &["-u", app_path.to_str().unwrap()]);
 
-    fs::remove_dir_all(destination)?;
+    fs::remove_dir_all(app_path)?;
 
     Ok(())
+}
+
+pub(super) fn activate(app_path: &Path) -> Result<()> {
+    if !app_path.exists() {
+        return Err(Error::AppNotFound);
+    }
+
+    let appex = appex_path(app_path)?;
+    let bundle_id = bundle_id(app_path)?;
+
+    clear_quarantine(app_path)?;
+
+    register_app(app_path)?;
+    register_ext(&appex)?;
+    elect_ext(&bundle_id);
+
+    if is_active(&bundle_id, app_path)? {
+        return Ok(());
+    }
+
+    // Fall back to opening the host app once when CLI activation is not enough.
+    run_cmd(OPEN, &["-g", "-j", app_path.to_str().unwrap()])?;
+
+    if is_active(&bundle_id, app_path)? {
+        Ok(())
+    } else {
+        Err(Error::ExtensionNotActivated {
+            app_path: app_path.display().to_string(),
+            bundle_id,
+        })
+    }
+}
+
+pub(super) fn appex_path(app_path: &Path) -> Result<PathBuf> {
+    let appex = app_path.join(FSKIT_APPEX_RELATIVE_PATH);
+    if !appex.exists() {
+        return Err(Error::ExtensionNotFound);
+    }
+    Ok(appex)
+}
+
+pub(super) fn app_path(appex_path: &Path) -> Result<PathBuf> {
+    let Some(app_path) = appex_path
+        .parent()
+        .and_then(|it| it.parent())
+        .and_then(|it| it.parent())
+    else {
+        return Err(Error::InvalidExtensionPath);
+    };
+    Ok(app_path.to_path_buf())
+}
+
+fn bundle_id(app_path: &Path) -> Result<String> {
+    Info::new(&appex_path(app_path)?)?
+        .bundle_id()
+        .map_err(Into::into)
+}
+
+fn register_app(app_path: &Path) -> Result<()> {
+    // Register the host app with LaunchServices.
+    run_cmd(LSREGISTER, &["-f", "-R", app_path.to_str().unwrap()])
+}
+
+fn register_ext(appex_path: &Path) -> Result<()> {
+    // Register the embedded FSKit extension with PlugInKit.
+    run_cmd(PLUGINKIT, &["-a", appex_path.to_str().unwrap()])
+}
+
+fn elect_ext(bundle_id: &str) {
+    // Prefer this FSKit module when the system supports extension election.
+    let _ = run_cmd(
+        PLUGINKIT,
+        &["-e", "use", "-p", FSKIT_EXTENSION_POINT, "-i", bundle_id],
+    );
 }
 
 fn clear_quarantine(app: &Path) -> Result<()> {
@@ -115,12 +151,18 @@ fn clear_quarantine(app: &Path) -> Result<()> {
     Ok(())
 }
 
-fn is_registered(bundle_id: &str) -> Result<bool> {
-    let Ok(output) = run_cmd_out(PLUGINKIT, &["-m", "-i", bundle_id]) else {
-        return Ok(false);
-    };
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    Ok(stdout.contains(bundle_id))
+fn is_active(bundle_id: &str, app_path: &Path) -> Result<bool> {
+    let statuses = registration::registrations(bundle_id)?;
+    let matching: Vec<_> = statuses
+        .iter()
+        .filter(|status| status.app_path == app_path)
+        .collect();
+
+    if statuses.len() > 1 {
+        Ok(matching.iter().any(|status| status.elected))
+    } else {
+        Ok(!matching.is_empty())
+    }
 }
 
 fn run_cmd(cmd: &'static str, args: &[&str]) -> Result<()> {
@@ -139,7 +181,7 @@ pub(super) fn run_cmd_out(cmd: &'static str, args: &[&str]) -> Result<Output> {
     }
 }
 
-fn describe_failure(output: &Output) -> String {
+pub(super) fn describe_failure(output: &Output) -> String {
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     if stderr.is_empty() {
         output.status.to_string()
@@ -165,14 +207,14 @@ pub enum Error {
     #[error("host application is already installed")]
     AppInstalled,
 
-    #[error("host application is not installed")]
-    AppNotInstalled,
-
     #[error("FSKit extension bundle not found in host application")]
     ExtensionNotFound,
 
-    #[error("FSKit extension is not registered: {bundle_id}")]
-    ExtensionNotRegistered { bundle_id: String },
+    #[error("invalid FSKit extension path")]
+    InvalidExtensionPath,
+
+    #[error("FSKit extension is not active for `{app_path}`: {bundle_id}")]
+    ExtensionNotActivated { app_path: String, bundle_id: String },
 
     #[error("command `{command}` failed: {status}")]
     CommandFailed { command: String, status: String },

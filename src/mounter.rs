@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use log::{error, info, warn};
 
-use crate::session::describe_failure;
+use crate::installer::describe_failure;
 use crate::{MountOptions, path};
 
 pub type Result<T> = std::result::Result<T, Error>;

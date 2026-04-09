@@ -13,7 +13,6 @@ pub use crate::pb::{
     ResourceIdentifier, StatFsResult, SupportedCapabilities, TaskOptions, VolumeBehavior,
     VolumeIdentifier, Xattrs, directory_entries,
 };
-pub use crate::registration::Status;
 use crate::session::Session;
 
 mod handler;
@@ -248,21 +247,13 @@ where
 /// # Behavior
 /// - If `force` is `true`, removes any existing app at `destination`.
 /// - Copies the app bundle from `source` to `destination`.
-/// - Registers the host app with LaunchServices.
-/// - Registers the embedded `FSKitExt.appex` with PlugInKit.
-/// - Clears `com.apple.quarantine` only when it is present on the installed app.
-/// - Falls back to launching the installed host app only if command-line registration
-///   was not enough.
+/// - Activates the installed host app after the copy step.
 ///
 /// # Commands
 /// ```text
 /// rm -rf <destination>
 /// ditto <source> <destination>
-/// xattr -dr com.apple.quarantine <destination>          # only if quarantine is present
-/// lsregister -f -R <destination>
-/// pluginkit -a <destination>/Contents/Extensions/FSKitExt.appex
-/// pluginkit -e use -p com.apple.fskit.fsmodule -i <appex bundle id>
-/// open <destination>                                    # fallback only
+/// activate(<destination>)
 /// ```
 pub fn install<P: AsRef<Path>, Q: AsRef<Path>>(
     source: P,
@@ -272,7 +263,32 @@ pub fn install<P: AsRef<Path>, Q: AsRef<Path>>(
     installer::run(source.as_ref(), destination.as_ref(), force)
 }
 
-/// Uninstalls the FSKit host application from `destination`.
+/// Activates an already installed FSKit host application at `app_path`.
+///
+/// # Behavior
+/// - Clears `com.apple.quarantine` only when it is present on the app.
+/// - Registers the host app with LaunchServices.
+/// - Registers the embedded `FSKitExt.appex` with PlugInKit.
+/// - Requests election for the extension bundle id.
+/// - Treats the host app as active when:
+///   - It is the only registration for the bundle id, or
+///   - It is the elected registration when multiple registrations exist.
+/// - Falls back to launching the host app only if command-line activation
+///   was not enough.
+///
+/// # Commands
+/// ```text
+/// xattr -dr com.apple.quarantine <app_path>             # only if quarantine is present
+/// lsregister -f -R <app_path>
+/// pluginkit -a <app_path>/Contents/Extensions/FSKitExt.appex
+/// pluginkit -e use -p com.apple.fskit.fsmodule -i <appex bundle id>
+/// open -g -j <app_path>                                 # fallback only
+/// ```
+pub fn activate<P: AsRef<Path>>(app_path: P) -> installer::Result<()> {
+    installer::activate(app_path.as_ref())
+}
+
+/// Uninstalls the FSKit host application from `app_path`.
 ///
 /// # Behavior
 /// - Best-effort unregisters the embedded `FSKitExt.appex` from PlugInKit.
@@ -281,19 +297,12 @@ pub fn install<P: AsRef<Path>, Q: AsRef<Path>>(
 ///
 /// # Commands
 /// ```text
-/// pluginkit -r <destination>/Contents/Extensions/FSKitExt.appex   # best effort
-/// lsregister -u <destination>                                     # best effort
-/// rm -rf <destination>
+/// pluginkit -r <app_path>/Contents/Extensions/FSKitExt.appex      # best effort
+/// lsregister -u <app_path>                                        # best effort
+/// rm -rf <app_path>
 /// ```
-pub fn uninstall<P: AsRef<Path>>(destination: P) -> installer::Result<()> {
-    installer::uninstall(destination.as_ref())
-}
-
-/// Returns all FSKit extension registrations matching `fskit_id`.
-///
-/// Each status item reports the extension path and whether PlugInKit marks it as elected.
-pub fn registrations(fskit_id: &str) -> installer::Result<Vec<Status>> {
-    registration::registrations(fskit_id)
+pub fn uninstall<P: AsRef<Path>>(app_path: P) -> installer::Result<()> {
+    installer::uninstall(app_path.as_ref())
 }
 
 #[macro_export]

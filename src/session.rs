@@ -1,13 +1,15 @@
-use std::process::Output;
+use std::path::Path;
 
 use log::error;
 
 use super::handler::Handler;
+use super::info::Info;
 use super::installer;
 use super::mounter::Mounter;
-use super::registration::read_config;
 use super::socket::Socket;
-use super::{Filesystem, MountOptions, mounter, socket};
+use super::{Filesystem, MountOptions, mounter, registration, socket};
+
+use self::Error::ExtensionNotRegistered;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -50,13 +52,24 @@ impl Drop for Session {
     }
 }
 
-pub(super) fn describe_failure(output: &Output) -> String {
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    if stderr.is_empty() {
-        output.status.to_string()
-    } else {
-        stderr
-    }
+fn read_config(fskit_id: &str) -> Result<(u16, String)> {
+    let statuses = registration::registrations(fskit_id)?;
+
+    let Some(status) = statuses
+        .iter()
+        .find(|status| status.elected)
+        .or_else(|| statuses.first())
+    else {
+        return Err(ExtensionNotRegistered);
+    };
+
+    let appex_path = installer::appex_path(&status.app_path)?;
+    let info = Info::new(Path::new(&appex_path)).map_err(installer::Error::from)?;
+
+    Ok((
+        info.server_port().map_err(installer::Error::from)?,
+        info.fs_type().map_err(installer::Error::from)?,
+    ))
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -72,4 +85,7 @@ pub enum Error {
 
     #[error(transparent)]
     Mounter(#[from] mounter::Error),
+
+    #[error("FSKit extension is not registered")]
+    ExtensionNotRegistered,
 }
