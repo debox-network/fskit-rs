@@ -270,11 +270,10 @@ pub fn install<P: AsRef<Path>, Q: AsRef<Path>>(
 /// - Registers the host app with LaunchServices.
 /// - Registers the embedded `FSKitExt.appex` with PlugInKit.
 /// - Requests election for the extension bundle id.
+/// - Performs a single activation check and then waits briefly so the system state can stabilize.
 /// - Treats the host app as active when:
 ///   - It is the only registration for the bundle id, or
 ///   - It is the elected registration when multiple registrations exist.
-/// - Falls back to launching the host app only if command-line activation
-///   was not enough.
 ///
 /// # Commands
 /// ```text
@@ -282,7 +281,6 @@ pub fn install<P: AsRef<Path>, Q: AsRef<Path>>(
 /// lsregister -f -R <app_path>
 /// pluginkit -a <app_path>/Contents/Extensions/FSKitExt.appex
 /// pluginkit -e use -p com.apple.fskit.fsmodule -i <appex bundle id>
-/// open -g -j <app_path>                                 # fallback only
 /// ```
 pub fn activate<P: AsRef<Path>>(app_path: P) -> installer::Result<()> {
     installer::activate(app_path.as_ref())

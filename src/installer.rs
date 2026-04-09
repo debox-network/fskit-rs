@@ -1,6 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::thread;
+use std::time::Duration;
 
 use super::info::Info;
 use super::registration;
@@ -10,9 +12,9 @@ pub(super) type Result<T> = std::result::Result<T, Error>;
 const LSREGISTER: &str = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
 pub(super) const PLUGINKIT: &str = "/usr/bin/pluginkit";
 const XATTR: &str = "/usr/bin/xattr";
-const OPEN: &str = "/usr/bin/open";
 const FSKIT_EXTENSION_POINT: &str = "com.apple.fskit.fsmodule";
 const FSKIT_APPEX_RELATIVE_PATH: &str = "Contents/Extensions/FSKitExt.appex";
+const ACTIVATE_STABILIZATION_DELAY: Duration = Duration::from_millis(300);
 
 pub(super) fn run(source: &Path, destination: &Path, force: bool) -> Result<()> {
     if !source.exists() {
@@ -76,20 +78,14 @@ pub(super) fn activate(app_path: &Path) -> Result<()> {
     elect_ext(&bundle_id);
 
     if is_active(&bundle_id, app_path)? {
+        thread::sleep(ACTIVATE_STABILIZATION_DELAY);
         return Ok(());
     }
 
-    // Fall back to opening the host app once when CLI activation is not enough.
-    run_cmd(OPEN, &["-g", "-j", app_path.to_str().unwrap()])?;
-
-    if is_active(&bundle_id, app_path)? {
-        Ok(())
-    } else {
-        Err(Error::ExtensionNotActivated {
-            app_path: app_path.display().to_string(),
-            bundle_id,
-        })
-    }
+    Err(Error::ExtensionNotActivated {
+        app_path: app_path.display().to_string(),
+        bundle_id,
+    })
 }
 
 pub(super) fn appex_path(app_path: &Path) -> Result<PathBuf> {
