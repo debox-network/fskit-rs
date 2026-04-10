@@ -16,7 +16,7 @@ pub(super) const PLUGINKIT: &str = "/usr/bin/pluginkit";
 const XATTR: &str = "/usr/bin/xattr";
 const FSKIT_EXTENSION_POINT: &str = "com.apple.fskit.fsmodule";
 const FSKIT_APPEX_RELATIVE_PATH: &str = "Contents/Extensions/FSKitExt.appex";
-const ACTIVATE_STABILIZATION_DELAY: Duration = Duration::from_millis(300);
+const SETTLE_DELAY: Duration = Duration::from_millis(300);
 
 pub(super) fn run(source: &Path, force: bool) -> Result<()> {
     if !source.exists() {
@@ -93,7 +93,6 @@ pub(super) fn activate(app_name: &OsStr) -> Result<()> {
     elect_ext(&bundle_id);
 
     if is_active(&bundle_id, &app_path)? {
-        thread::sleep(ACTIVATE_STABILIZATION_DELAY);
         return Ok(());
     }
 
@@ -120,12 +119,16 @@ fn bundle_id(app_path: &Path) -> Result<String> {
 
 fn register_app(app_path: &Path) -> Result<()> {
     // Register the host app with LaunchServices.
-    run_cmd(LSREGISTER, &["-f", "-R", app_path.to_str().unwrap()])
+    run_cmd(LSREGISTER, &["-f", "-R", app_path.to_str().unwrap()])?;
+    thread::sleep(SETTLE_DELAY);
+    Ok(())
 }
 
 fn register_ext(appex_path: &Path) -> Result<()> {
     // Register the embedded FSKit extension with PlugInKit.
-    run_cmd(PLUGINKIT, &["-a", appex_path.to_str().unwrap()])
+    run_cmd(PLUGINKIT, &["-a", appex_path.to_str().unwrap()])?;
+    thread::sleep(SETTLE_DELAY);
+    Ok(())
 }
 
 fn elect_ext(bundle_id: &str) {
@@ -134,6 +137,7 @@ fn elect_ext(bundle_id: &str) {
         PLUGINKIT,
         &["-e", "use", "-p", FSKIT_EXTENSION_POINT, "-i", bundle_id],
     );
+    thread::sleep(SETTLE_DELAY);
 }
 
 fn clear_quarantine(app: &Path) -> Result<()> {
