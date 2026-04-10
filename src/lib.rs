@@ -242,28 +242,31 @@ where
     Session::new(fs, opts).await
 }
 
-/// Installs the FSKit host application into `destination` and registers its extension.
+/// Installs the FSKit host application into `/Applications/<source app name>`
+/// and registers its extension.
 ///
 /// # Behavior
-/// - If `force` is `true`, removes any existing app at `destination`.
-/// - Copies the app bundle from `source` to `destination`.
+/// - Derives the destination from the source app bundle name.
+/// - If `force` is `true`, removes any existing app at `/Applications/<source app name>`.
+/// - Copies the app bundle from `source` to `/Applications/<source app name>`.
 /// - Activates the installed host app after the copy step.
+///
+/// # Observed macOS behavior
+/// - FSKit host apps are observed to work reliably only from `/Applications`.
+/// - Host apps copied to other locations may register successfully but still fail at runtime with
+///   `com.apple.extensionKit.errorDomain error 2`.
 ///
 /// # Commands
 /// ```text
-/// rm -rf <destination>
-/// ditto <source> <destination>
-/// activate(<destination>)
+/// rm -rf /Applications/<source app name>
+/// ditto <source> /Applications/<source app name>
+/// activate(/Applications/<source app name>)
 /// ```
-pub fn install<P: AsRef<Path>, Q: AsRef<Path>>(
-    source: P,
-    destination: Q,
-    force: bool,
-) -> installer::Result<()> {
-    installer::run(source.as_ref(), destination.as_ref(), force)
+pub fn install<P: AsRef<Path>>(source: P, force: bool) -> installer::Result<()> {
+    installer::run(source.as_ref(), force)
 }
 
-/// Activates an already installed FSKit host application at `app_path`.
+/// Activates an already installed FSKit host application from `/Applications/<app name>`.
 ///
 /// # Behavior
 /// - Clears `com.apple.quarantine` only when it is present on the app.
@@ -271,36 +274,45 @@ pub fn install<P: AsRef<Path>, Q: AsRef<Path>>(
 /// - Registers the embedded `FSKitExt.appex` with PlugInKit.
 /// - Requests election for the extension bundle id.
 /// - Performs a single activation check and then waits briefly so the system state can stabilize.
+/// - Returns immediately without re-registering when the host app is already active.
 /// - Treats the host app as active when:
 ///   - It is the only registration for the bundle id, or
 ///   - It is the elected registration when multiple registrations exist.
 ///
+/// # Observed macOS behavior
+/// - Re-registering an already working FSKit host app can destabilize ExtensionKit state and lead
+///   to `com.apple.extensionKit.errorDomain error 2` until the machine is rebooted.
+/// - `activate()` avoids repeating registration commands when the host app is already active.
+/// - Host apps outside `/Applications` may still fail at runtime even when activation succeeds.
+///
 /// # Commands
 /// ```text
-/// xattr -dr com.apple.quarantine <app_path>             # only if quarantine is present
-/// lsregister -f -R <app_path>
-/// pluginkit -a <app_path>/Contents/Extensions/FSKitExt.appex
+/// xattr -dr com.apple.quarantine /Applications/<app name>             # only if quarantine is present
+/// lsregister -f -R /Applications/<app name>                           # only if the app is not registered
+/// pluginkit -a /Applications/<app name>/Contents/Extensions/FSKitExt.appex
+///                                                     # only if the extension is not registered
 /// pluginkit -e use -p com.apple.fskit.fsmodule -i <appex bundle id>
 /// ```
-pub fn activate<P: AsRef<Path>>(app_path: P) -> installer::Result<()> {
-    installer::activate(app_path.as_ref())
+pub fn activate<S: AsRef<OsStr>>(app_name: S) -> installer::Result<()> {
+    installer::activate(app_name.as_ref())
 }
 
-/// Uninstalls the FSKit host application from `app_path`.
+/// Uninstalls the FSKit host application from `/Applications/<app name>`.
 ///
 /// # Behavior
+/// - Resolves the host app as `/Applications/<app name>`.
 /// - Best-effort unregisters the embedded `FSKitExt.appex` from PlugInKit.
 /// - Best-effort unregisters the host app from LaunchServices.
-/// - Removes the app bundle from `destination`.
+/// - Removes the app bundle from `/Applications/<app name>`.
 ///
 /// # Commands
 /// ```text
-/// pluginkit -r <app_path>/Contents/Extensions/FSKitExt.appex      # best effort
-/// lsregister -u <app_path>                                        # best effort
-/// rm -rf <app_path>
+/// pluginkit -r /Applications/<app name>/Contents/Extensions/FSKitExt.appex      # best effort
+/// lsregister -u /Applications/<app name>                                        # best effort
+/// rm -rf /Applications/<app name>
 /// ```
-pub fn uninstall<P: AsRef<Path>>(app_path: P) -> installer::Result<()> {
-    installer::uninstall(app_path.as_ref())
+pub fn uninstall<S: AsRef<OsStr>>(app_name: S) -> installer::Result<()> {
+    installer::uninstall(app_name.as_ref())
 }
 
 #[macro_export]

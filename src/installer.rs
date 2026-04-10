@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -9,6 +10,7 @@ use super::registration;
 
 pub(super) type Result<T> = std::result::Result<T, Error>;
 
+const APPLICATIONS_DIR: &str = "/Applications";
 const LSREGISTER: &str = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
 pub(super) const PLUGINKIT: &str = "/usr/bin/pluginkit";
 const XATTR: &str = "/usr/bin/xattr";
@@ -16,39 +18,43 @@ const FSKIT_EXTENSION_POINT: &str = "com.apple.fskit.fsmodule";
 const FSKIT_APPEX_RELATIVE_PATH: &str = "Contents/Extensions/FSKitExt.appex";
 const ACTIVATE_STABILIZATION_DELAY: Duration = Duration::from_millis(300);
 
-pub(super) fn run(source: &Path, destination: &Path, force: bool) -> Result<()> {
+pub(super) fn run(source: &Path, force: bool) -> Result<()> {
     if !source.exists() {
-        return Err(Error::AppNotFound);
+        return Err(Error::InvalidSource);
     }
 
-    let Some(parent) = destination.parent() else {
-        return Err(Error::InvalidDestination);
+    let Some(app_name) = source.file_name() else {
+        return Err(Error::InvalidSource);
     };
+    let app_path = app_path(app_name);
 
-    if destination.exists() {
+    if app_path.exists() {
         if !force {
             return Err(Error::AppInstalled);
         }
-        fs::remove_dir_all(destination)?;
+        fs::remove_dir_all(&app_path)?;
     }
 
+    let parent = app_path.parent().unwrap();
     fs::create_dir_all(parent)?;
 
     // Copy the host app bundle into its final installation path.
     run_cmd(
         "ditto",
-        &[source.to_str().unwrap(), destination.to_str().unwrap()],
+        &[source.to_str().unwrap(), app_path.to_str().unwrap()],
     )?;
 
-    activate(destination)
+    activate(app_name)
 }
 
-pub(super) fn uninstall(app_path: &Path) -> Result<()> {
+pub(super) fn uninstall(app_name: &OsStr) -> Result<()> {
+    let app_path = app_path(app_name);
+
     if !app_path.exists() {
-        return Err(Error::AppNotFound);
+        return Err(Error::AppNotInstalled);
     }
 
-    let appex = appex_path(app_path)?;
+    let appex = appex_path(&app_path)?;
 
     if appex.exists() {
         // Best-effort unregister the embedded FSKit extension first.
@@ -58,34 +64,44 @@ pub(super) fn uninstall(app_path: &Path) -> Result<()> {
     // Best-effort unregister the host app from LaunchServices.
     let _ = run_cmd(LSREGISTER, &["-u", app_path.to_str().unwrap()]);
 
-    fs::remove_dir_all(app_path)?;
+    fs::remove_dir_all(&app_path)?;
 
     Ok(())
 }
 
-pub(super) fn activate(app_path: &Path) -> Result<()> {
+pub(super) fn activate(app_name: &OsStr) -> Result<()> {
+    let app_path = app_path(app_name);
+
     if !app_path.exists() {
-        return Err(Error::AppNotFound);
+        return Err(Error::AppNotInstalled);
     }
 
-    let appex = appex_path(app_path)?;
-    let bundle_id = bundle_id(app_path)?;
+    let appex = appex_path(&app_path)?;
+    let bundle_id = bundle_id(&app_path)?;
 
-    clear_quarantine(app_path)?;
+    if is_active(&bundle_id, &app_path)? {
+        return Ok(());
+    }
 
-    register_app(app_path)?;
-    register_ext(&appex)?;
+    clear_quarantine(&app_path)?;
+
+    if !is_registered(&bundle_id, &app_path)? {
+        register_app(&app_path)?;
+        register_ext(&appex)?;
+    }
+
     elect_ext(&bundle_id);
 
-    if is_active(&bundle_id, app_path)? {
+    if is_active(&bundle_id, &app_path)? {
         thread::sleep(ACTIVATE_STABILIZATION_DELAY);
         return Ok(());
     }
 
-    Err(Error::ExtensionNotActivated {
-        app_path: app_path.display().to_string(),
-        bundle_id,
-    })
+    Err(Error::ExtensionNotActivated { bundle_id })
+}
+
+pub(super) fn app_path(app_name: &OsStr) -> PathBuf {
+    Path::new(APPLICATIONS_DIR).join(app_name)
 }
 
 pub(super) fn appex_path(app_path: &Path) -> Result<PathBuf> {
@@ -94,17 +110,6 @@ pub(super) fn appex_path(app_path: &Path) -> Result<PathBuf> {
         return Err(Error::ExtensionNotFound);
     }
     Ok(appex)
-}
-
-pub(super) fn app_path(appex_path: &Path) -> Result<PathBuf> {
-    let Some(app_path) = appex_path
-        .parent()
-        .and_then(|it| it.parent())
-        .and_then(|it| it.parent())
-    else {
-        return Err(Error::InvalidExtensionPath);
-    };
-    Ok(app_path.to_path_buf())
 }
 
 fn bundle_id(app_path: &Path) -> Result<String> {
@@ -161,6 +166,11 @@ fn is_active(bundle_id: &str, app_path: &Path) -> Result<bool> {
     }
 }
 
+fn is_registered(bundle_id: &str, app_path: &Path) -> Result<bool> {
+    let statuses = registration::registrations(bundle_id)?;
+    Ok(statuses.iter().any(|status| status.app_path == app_path))
+}
+
 fn run_cmd(cmd: &'static str, args: &[&str]) -> Result<()> {
     run_cmd_out(cmd, args).map(|_| ())
 }
@@ -194,11 +204,11 @@ pub enum Error {
     #[error(transparent)]
     Info(#[from] super::info::Error),
 
-    #[error("host application not found")]
-    AppNotFound,
+    #[error("invalid host application source path")]
+    InvalidSource,
 
-    #[error("invalid installation destination")]
-    InvalidDestination,
+    #[error("host application is not installed")]
+    AppNotInstalled,
 
     #[error("host application is already installed")]
     AppInstalled,
@@ -209,8 +219,8 @@ pub enum Error {
     #[error("invalid FSKit extension path")]
     InvalidExtensionPath,
 
-    #[error("FSKit extension is not active for `{app_path}`: {bundle_id}")]
-    ExtensionNotActivated { app_path: String, bundle_id: String },
+    #[error("FSKit extension is not active: {bundle_id}")]
+    ExtensionNotActivated { bundle_id: String },
 
     #[error("command `{command}` failed: {status}")]
     CommandFailed { command: String, status: String },

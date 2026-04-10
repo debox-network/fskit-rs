@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use log::error;
 use regex::Regex;
 
-use super::installer::{PLUGINKIT, Result, app_path, run_cmd_out};
+use super::installer::{Error, PLUGINKIT, Result, run_cmd_out};
 
 #[derive(Debug, Clone)]
 pub(super) struct Status {
@@ -37,8 +37,15 @@ fn parse_statuses(stdout: &str) -> Result<Vec<Status>> {
 
         if let Some(captures) = path_re.captures(line) {
             let appex_path = PathBuf::from(&captures[1]);
+            let Some(app_path) = appex_path
+                .parent()
+                .and_then(|it| it.parent())
+                .and_then(|it| it.parent())
+            else {
+                return Err(Error::InvalidExtensionPath);
+            };
             list.push(Status {
-                app_path: app_path(&appex_path)?,
+                app_path: app_path.to_path_buf(),
                 elected,
             });
             elected = false;

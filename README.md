@@ -29,8 +29,14 @@ FSKitExt appex). For the Swift/FSKit integration details, see:
   schema is the wire contract between the Swift appex and this Rust backend — defining all RPC messages/enums.
 - **Handle errors:** Unified `Error` (includes POSIX via `libc::*`) and `Result<T>`.
 - **Session runner:** `session::mount(fs, opts)` mounts and serves requests until dropped.
-- **Installer helpers:** `install(source, destination, force)`, `activate(app_path)`, and `uninstall(app_path)` utilities
-  for host app lifecycle (optional).
+- **Installer helpers:** `install(source, force)`, `activate(app_name)`, and `uninstall(app_name)` utilities for
+  host app lifecycle (optional).
+
+Observed on current macOS versions:
+- FSKit host apps are reliable only when installed into `/Applications/<app name>`.
+- Host apps in other locations may register successfully but still fail at runtime with
+  `com.apple.extensionKit.errorDomain error 2`.
+- Re-registering an already working host app can destabilize the ExtensionKit state and may require a reboot.
 
 > This crate is the transport + protocol + trait layer. You bring the actual file system logic.
 
