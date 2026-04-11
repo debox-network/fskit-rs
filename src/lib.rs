@@ -252,15 +252,15 @@ where
 /// - Activates the installed host app after the copy step.
 ///
 /// # Observed macOS behavior
-/// - FSKit host apps are observed to work reliably only from `/Applications`.
-/// - Host apps copied to other locations may register successfully but still fail at runtime with
-///   `com.apple.extensionKit.errorDomain error 2`.
+/// - This crate treats `/Applications/<source app name>` as the supported installation target.
+/// - During local experiments, host apps from other locations may also work after the extension
+///   is enabled, but that behavior is stateful and not guaranteed.
 ///
 /// # Commands
 /// ```text
 /// rm -rf /Applications/<source app name>
 /// ditto <source> /Applications/<source app name>
-/// activate(/Applications/<source app name>)
+/// activate(<source app name>)
 /// ```
 pub fn install<P: AsRef<Path>>(source: P, force: bool) -> installer::Result<()> {
     installer::run(source.as_ref(), force)
@@ -273,24 +273,19 @@ pub fn install<P: AsRef<Path>>(source: P, force: bool) -> installer::Result<()> 
 /// - Registers the host app with LaunchServices.
 /// - Registers the embedded `FSKitExt.appex` with PlugInKit.
 /// - Requests election for the extension bundle id.
-/// - Performs a single activation check and then waits briefly so the system state can stabilize.
-/// - Returns immediately without re-registering when the host app is already active.
-/// - Treats the host app as active when:
-///   - It is the only registration for the bundle id, or
-///   - It is the elected registration when multiple registrations exist.
+/// - Performs one activation check before registration and one after registration.
+/// - Returns success only when the host app is considered active after the registration steps.
 ///
 /// # Observed macOS behavior
-/// - Re-registering an already working FSKit host app can destabilize ExtensionKit state and lead
-///   to `com.apple.extensionKit.errorDomain error 2` until the machine is rebooted.
-/// - `activate()` avoids repeating registration commands when the host app is already active.
-/// - Host apps outside `/Applications` may still fail at runtime even when activation succeeds.
+/// - `activate()` always retries the registration steps when the host app is not already active.
+/// - PlugInKit/ExtensionKit state may remain sensitive to prior registrations, app identities,
+///   and install paths.
 ///
 /// # Commands
 /// ```text
-/// xattr -dr com.apple.quarantine /Applications/<app name>             # only if quarantine is present
-/// lsregister -f -R /Applications/<app name>                           # only if the app is not registered
+/// xattr -dr com.apple.quarantine /Applications/<app name>         # only if quarantine is present
+/// lsregister -f -R /Applications/<app name>
 /// pluginkit -a /Applications/<app name>/Contents/Extensions/FSKitExt.appex
-///                                                     # only if the extension is not registered
 /// pluginkit -e use -p com.apple.fskit.fsmodule -i <appex bundle id>
 /// ```
 pub fn activate<S: AsRef<OsStr>>(app_name: S) -> installer::Result<()> {

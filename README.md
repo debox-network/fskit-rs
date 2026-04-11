@@ -33,10 +33,11 @@ FSKitExt appex). For the Swift/FSKit integration details, see:
   host app lifecycle (optional).
 
 Observed on current macOS versions:
-- FSKit host apps are reliable only when installed into `/Applications/<app name>`.
-- Host apps in other locations may register successfully but still fail at runtime with
-  `com.apple.extensionKit.errorDomain error 2`.
-- Re-registering an already working host app can destabilize the ExtensionKit state and may require a reboot.
+- The installer helpers manage host apps in `/Applications/<app name>`, which remains the supported installation target
+  for this crate.
+- During local experiments, non-`/Applications` paths may also work after the extension is enabled, but runtime behavior
+  is stateful and not guaranteed across identities, paths, or prior registrations.
+- `activate(app_name)` re-runs the registration steps whenever the host app is not already active.
 
 > This crate is the transport + protocol + trait layer. You bring the actual file system logic.
 

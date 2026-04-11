@@ -2,8 +2,6 @@ use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::thread;
-use std::time::Duration;
 
 use super::info::Info;
 use super::registration;
@@ -16,7 +14,6 @@ pub(super) const PLUGINKIT: &str = "/usr/bin/pluginkit";
 const XATTR: &str = "/usr/bin/xattr";
 const FSKIT_EXTENSION_POINT: &str = "com.apple.fskit.fsmodule";
 const FSKIT_APPEX_RELATIVE_PATH: &str = "Contents/Extensions/FSKitExt.appex";
-const SETTLE_DELAY: Duration = Duration::from_millis(300);
 
 pub(super) fn run(source: &Path, force: bool) -> Result<()> {
     if !source.exists() {
@@ -85,11 +82,8 @@ pub(super) fn activate(app_name: &OsStr) -> Result<()> {
 
     clear_quarantine(&app_path)?;
 
-    if !is_registered(&bundle_id, &app_path)? {
-        register_app(&app_path)?;
-        register_ext(&appex)?;
-    }
-
+    register_app(&app_path)?;
+    register_ext(&appex)?;
     elect_ext(&bundle_id);
 
     if is_active(&bundle_id, &app_path)? {
@@ -119,16 +113,12 @@ fn bundle_id(app_path: &Path) -> Result<String> {
 
 fn register_app(app_path: &Path) -> Result<()> {
     // Register the host app with LaunchServices.
-    run_cmd(LSREGISTER, &["-f", "-R", app_path.to_str().unwrap()])?;
-    thread::sleep(SETTLE_DELAY);
-    Ok(())
+    run_cmd(LSREGISTER, &["-f", "-R", app_path.to_str().unwrap()])
 }
 
 fn register_ext(appex_path: &Path) -> Result<()> {
     // Register the embedded FSKit extension with PlugInKit.
-    run_cmd(PLUGINKIT, &["-a", appex_path.to_str().unwrap()])?;
-    thread::sleep(SETTLE_DELAY);
-    Ok(())
+    run_cmd(PLUGINKIT, &["-a", appex_path.to_str().unwrap()])
 }
 
 fn elect_ext(bundle_id: &str) {
@@ -137,7 +127,6 @@ fn elect_ext(bundle_id: &str) {
         PLUGINKIT,
         &["-e", "use", "-p", FSKIT_EXTENSION_POINT, "-i", bundle_id],
     );
-    thread::sleep(SETTLE_DELAY);
 }
 
 fn clear_quarantine(app: &Path) -> Result<()> {
@@ -168,11 +157,6 @@ fn is_active(bundle_id: &str, app_path: &Path) -> Result<bool> {
     } else {
         Ok(!matching.is_empty())
     }
-}
-
-fn is_registered(bundle_id: &str, app_path: &Path) -> Result<bool> {
-    let statuses = registration::registrations(bundle_id)?;
-    Ok(statuses.iter().any(|status| status.app_path == app_path))
 }
 
 fn run_cmd(cmd: &'static str, args: &[&str]) -> Result<()> {
