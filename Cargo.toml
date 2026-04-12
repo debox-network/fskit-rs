@@ -6,7 +6,10 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 description = "Rust crate for FSKitBridge protocol & socket layer (TCP + Protobuf)"
 repository = "https://github.com/debox-network/fskit-rs"
-authors = ["Debox Network <dev@debox.network>"]
+authors = [
+    "Debox Team <dev@debox.network>",
+    "Pavel Denisov <pdenisov@debox.network>",
+]
 keywords = ["macos", "fskit", "extensionkit", "filesystem"]
 categories = ["filesystem", "network-programming", "os::macos-apis"]
 
