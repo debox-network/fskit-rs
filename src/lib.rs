@@ -266,7 +266,7 @@ where
 /// activate(<source app name>)
 /// ```
 pub fn install<P: AsRef<Path>>(source: P) -> installer::Result<()> {
-    installer::run(source.as_ref())
+    installer::install(source.as_ref())
 }
 
 /// Activates an already installed FSKit host application from `/Applications/<app name>`.

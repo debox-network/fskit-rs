@@ -1,6 +1,7 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::{LazyLock, Mutex};
 use std::{env, fs};
 
 use super::info::Info;
@@ -18,7 +19,11 @@ const XATTR: &str = "/usr/bin/xattr";
 const FSKIT_EXTENSION_POINT: &str = "com.apple.fskit.fsmodule";
 const FSKIT_APPEX_RELATIVE_PATH: &str = "Contents/Extensions/FSKitExt.appex";
 
-pub(super) fn run(source: &Path) -> Result<()> {
+static INSTALLER_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+pub(super) fn install(source: &Path) -> Result<()> {
+    let _guard = INSTALLER_LOCK.lock().expect("installer mutex poisoned");
+
     if !source.is_dir() {
         return Err(Error::InvalidSource);
     }
@@ -49,6 +54,8 @@ pub(super) fn run(source: &Path) -> Result<()> {
 }
 
 pub(super) fn uninstall(app_name: &OsStr) -> Result<()> {
+    let _guard = INSTALLER_LOCK.lock().expect("installer mutex poisoned");
+
     let app_path = app_path(app_name);
 
     if !app_path.exists() {
@@ -69,6 +76,8 @@ pub(super) fn uninstall(app_name: &OsStr) -> Result<()> {
 }
 
 pub(super) fn activate(app_name: &OsStr) -> Result<()> {
+    let _guard = INSTALLER_LOCK.lock().expect("installer mutex poisoned");
+
     let app_path = app_path(app_name);
 
     if !app_path.exists() {
