@@ -29,7 +29,7 @@ FSKitExt appex). For the Swift/FSKit integration details, see:
   schema is the wire contract between the Swift appex and this Rust backend — defining all RPC messages/enums.
 - **Handle errors:** Unified `Error` (includes POSIX via `libc::*`) and `Result<T>`.
 - **Session runner:** `session::mount(fs, opts)` mounts and serves requests until dropped.
-- **Installer helpers:** `install(source, force)`, `activate(app_name)`, and `uninstall(app_name)` utilities for
+- **Installer helpers:** `install(source)`, `activate(app_name)`, and `uninstall(app_name)` utilities for
   host app lifecycle (optional).
 
 Observed on current macOS versions:
@@ -37,7 +37,14 @@ Observed on current macOS versions:
   for this crate.
 - During local experiments, non-`/Applications` paths may also work after the extension is enabled, but runtime behavior
   is stateful and not guaranteed across identities, paths, or prior registrations.
-- `activate(app_name)` re-runs the registration steps whenever the host app is not already active.
+- `install(source)` is intentionally non-destructive: it does not overwrite an existing host app at the final
+  destination and returns `AppInstalled` instead.
+- `activate(app_name)` verifies the installed app bundle, then re-runs the registration steps whenever the host app is
+  not already active.
+- If activation still fails, the error now distinguishes between "not registered", "registered from a different app
+  path", and "registered but not elected" states.
+- `uninstall(app_name)` removes the installed app and also performs best-effort cleanup of related LaunchServices,
+  PlugInKit, `Application Scripts`, and `Containers` state for the exact installed bundle identities.
 
 > This crate is the transport + protocol + trait layer. You bring the actual file system logic.
 

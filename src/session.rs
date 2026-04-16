@@ -52,8 +52,8 @@ impl Drop for Session {
     }
 }
 
-fn read_config(fskit_id: &str) -> Result<(u16, String)> {
-    let statuses = registration::registrations(fskit_id)?;
+fn read_config(appex_id: &str) -> Result<(u16, String)> {
+    let statuses = registration::registrations(appex_id)?;
 
     let Some(status) = statuses
         .iter()

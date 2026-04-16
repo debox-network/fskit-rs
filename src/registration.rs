@@ -11,11 +11,11 @@ pub(super) struct Status {
     pub elected: bool,
 }
 
-pub(super) fn registrations(fskit_id: &str) -> Result<Vec<Status>> {
-    let output = match run_cmd_out(PLUGINKIT, &["-m", "-i", fskit_id, "--raw"]) {
+pub(super) fn registrations(appex_id: &str) -> Result<Vec<Status>> {
+    let output = match run_cmd_out(PLUGINKIT, &["-m", "-i", appex_id, "--raw"]) {
         Ok(output) => output,
         Err(err) => {
-            error!("failed to query pluginkit for {fskit_id}: {err}");
+            error!("failed to query pluginkit for {appex_id}: {err}");
             return Err(err);
         }
     };

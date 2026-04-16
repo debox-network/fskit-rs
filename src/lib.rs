@@ -247,8 +247,10 @@ where
 ///
 /// # Behavior
 /// - Derives the destination from the source app bundle name.
-/// - If `force` is `true`, removes any existing app at `/Applications/<source app name>`.
+/// - Returns `AppInstalled` if `/Applications/<source app name>` already exists.
+/// - Verifies the source app bundle signature before the copy step.
 /// - Copies the app bundle from `source` to `/Applications/<source app name>`.
+/// - Verifies the installed app bundle signature after the copy step.
 /// - Activates the installed host app after the copy step.
 ///
 /// # Observed macOS behavior
@@ -258,23 +260,27 @@ where
 ///
 /// # Commands
 /// ```text
-/// rm -rf /Applications/<source app name>
+/// codesign --verify --deep --strict --verbose=2 <source>
 /// ditto <source> /Applications/<source app name>
+/// codesign --verify --deep --strict --verbose=2 /Applications/<source app name>
 /// activate(<source app name>)
 /// ```
-pub fn install<P: AsRef<Path>>(source: P, force: bool) -> installer::Result<()> {
-    installer::run(source.as_ref(), force)
+pub fn install<P: AsRef<Path>>(source: P) -> installer::Result<()> {
+    installer::run(source.as_ref())
 }
 
 /// Activates an already installed FSKit host application from `/Applications/<app name>`.
 ///
 /// # Behavior
+/// - Verifies the installed app bundle signature before any registration step.
 /// - Clears `com.apple.quarantine` only when it is present on the app.
 /// - Registers the host app with LaunchServices.
 /// - Registers the embedded `FSKitExt.appex` with PlugInKit.
 /// - Requests election for the extension bundle id.
 /// - Performs one activation check before registration and one after registration.
 /// - Returns success only when the host app is considered active after the registration steps.
+/// - On failure, reports whether the extension was never registered, only registered from a
+///   different app path, or registered but not elected.
 ///
 /// # Observed macOS behavior
 /// - `activate()` always retries the registration steps when the host app is not already active.
@@ -283,6 +289,7 @@ pub fn install<P: AsRef<Path>>(source: P, force: bool) -> installer::Result<()> 
 ///
 /// # Commands
 /// ```text
+/// codesign --verify --deep --strict --verbose=2 /Applications/<app name>
 /// xattr -dr com.apple.quarantine /Applications/<app name>         # only if quarantine is present
 /// lsregister -f -R /Applications/<app name>
 /// pluginkit -a /Applications/<app name>/Contents/Extensions/FSKitExt.appex
@@ -298,12 +305,21 @@ pub fn activate<S: AsRef<OsStr>>(app_name: S) -> installer::Result<()> {
 /// - Resolves the host app as `/Applications/<app name>`.
 /// - Best-effort unregisters the embedded `FSKitExt.appex` from PlugInKit.
 /// - Best-effort unregisters the host app from LaunchServices.
+/// - Best-effort unregisters any remaining registrations for the same appex bundle id.
+/// - Removes app-specific entries under `~/Library/Application Scripts` and `~/Library/Containers`.
 /// - Removes the app bundle from `/Applications/<app name>`.
 ///
 /// # Commands
 /// ```text
 /// pluginkit -r /Applications/<app name>/Contents/Extensions/FSKitExt.appex      # best effort
 /// lsregister -u /Applications/<app name>                                        # best effort
+/// pluginkit -m -i <appex bundle id> --raw                                       # inspect remaining registrations
+/// pluginkit -r <other registered appex path>                                    # best effort
+/// lsregister -u <other registered app path>                                     # best effort
+/// rm -rf ~/Library/Application\ Scripts/<app bundle id>                         # best effort
+/// rm -rf ~/Library/Application\ Scripts/<appex bundle id>                       # best effort
+/// rm -rf ~/Library/Containers/<app bundle id>                                   # best effort
+/// rm -rf ~/Library/Containers/<appex bundle id>                                 # best effort
 /// rm -rf /Applications/<app name>
 /// ```
 pub fn uninstall<S: AsRef<OsStr>>(app_name: S) -> installer::Result<()> {
