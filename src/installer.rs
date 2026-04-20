@@ -50,7 +50,7 @@ pub(super) fn install(source: &Path) -> Result<()> {
 
     verify_app(&app_path)?;
 
-    activate(app_name)
+    activate_impl(app_name)
 }
 
 pub(super) fn uninstall(app_name: &OsStr) -> Result<()> {
@@ -77,7 +77,10 @@ pub(super) fn uninstall(app_name: &OsStr) -> Result<()> {
 
 pub(super) fn activate(app_name: &OsStr) -> Result<()> {
     let _guard = INSTALLER_LOCK.lock().expect("installer mutex poisoned");
+    activate_impl(app_name)
+}
 
+fn activate_impl(app_name: &OsStr) -> Result<()> {
     let app_path = app_path(app_name);
 
     if !app_path.exists() {
